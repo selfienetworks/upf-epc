@@ -110,7 +110,8 @@ void sig_handler(int signo) {
 int main(int argc, char **argv) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
-  std::map<uint64_t, bool> zmq_sess_map;
+  std::map<uint64_t, struct cdr_msg *> zmq_sess_map;
+  struct cdr_msg *cdr;
 
   context1 = zmq_ctx_new();
   context2 = zmq_ctx_new();
@@ -152,117 +153,120 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  //  Process messages from either socket
-  while (true) {
-    static const zmq_pollitem_t items[] = {
-        {receiver, 0, ZMQ_POLLIN, 0},
-    };
-    zmq_poll((zmq_pollitem_t *)items, 1, -1);
-    if (items[0].revents & ZMQ_POLLIN) {
-      struct msgbuf rbuf;
-      struct resp_msgbuf resp;
-      int size = zmq_recv(receiver, &rbuf, sizeof(rbuf), 0);
-      if (size == -1) {
-        std::cerr << "Error in zmq reception: " << strerror(errno) << std::endl;
-        break;
-      }
-      long mtype = rbuf.mtype;
-      memset(&resp, 0, sizeof(struct resp_msgbuf));
-      switch (mtype) {
-        case MSG_SESS_CRE:
-          VLOG(1) << "Got a session create request, ";
-          VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
-                  << ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
-                  << ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
-                  << ", enb_teid: "
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << " ("
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << ")"
-                  << std::endl;
-          resp.op_id = rbuf.sess_entry.op_id;
-          resp.dp_id.id = DPN_ID;
-          resp.mtype = DPN_RESPONSE;
-          zmq_sess_map[SESS_ID(rbuf.sess_entry.ue_addr.u.ipv4_addr,
-                               DEFAULT_BEARER)] = true;
-          resp.sess_id = rbuf.sess_entry.sess_id;
-          break;
-        case MSG_SESS_MOD:
-          VLOG(1) << "Got a session modify request, ";
-          VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
-                  << ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
-                  << ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
-                  << ", enb_teid: "
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << " ("
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << ")"
-                  << std::endl;
-          resp.op_id = rbuf.sess_entry.op_id;
-          resp.dp_id.id = DPN_ID;
-          resp.mtype = DPN_RESPONSE;
-          resp.sess_id = rbuf.sess_entry.sess_id;
-          if (zmq_sess_map.find(SESS_ID(rbuf.sess_entry.ue_addr.u.ipv4_addr,
-                                        DEFAULT_BEARER)) ==
-              zmq_sess_map.end()) {
-            VLOG(1) << "No record found!" << std::endl;
-            break;
-          }
-          {
-            // Create BessClient
-            BessClient b(CreateChannel(std::string(args.bessd_ip) + ":" +
-                                           std::to_string(args.bessd_port),
-                                       InsecureChannelCredentials()));
-            b.runAddCommand(rbuf.sess_entry.ul_s1_info.sgw_teid,
-                            rbuf.sess_entry.dl_s1_info.enb_teid,
-                            rbuf.sess_entry.ue_addr.u.ipv4_addr,
-                            rbuf.sess_entry.ul_s1_info.enb_addr.u.ipv4_addr,
-                            args.encapmod);
-          }
-          break;
-        case MSG_SESS_DEL:
-          VLOG(1) << "Got a session delete request" << std::endl;
-          VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
-                  << ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
-                  << ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
-                  << ", enb_teid: "
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << " ("
-                  << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid) << ")"
-                  << std::endl;
-          resp.op_id = rbuf.sess_entry.op_id;
-          resp.dp_id.id = DPN_ID;
-          resp.mtype = DPN_RESPONSE;
-          resp.sess_id = rbuf.sess_entry.sess_id;
-          /* why is the ue ip address stored in reverse endian order just in
-           * delete message? */
-          if (zmq_sess_map.find(
-                  SESS_ID(ntohl(rbuf.sess_entry.ue_addr.u.ipv4_addr),
-                          DEFAULT_BEARER)) == zmq_sess_map.end()) {
-            VLOG(1) << "No record found!" << std::endl;
-            break;
-          }
-          {
-            // Create BessClient
-            BessClient b(CreateChannel(std::string(args.bessd_ip) + ":" +
-                                           std::to_string(args.bessd_port),
-                                       InsecureChannelCredentials()));
-            b.runRemoveCommand(ntohl(rbuf.sess_entry.ue_addr.u.ipv4_addr),
-                               args.encapmod);
-            std::map<std::uint64_t, bool>::iterator it = zmq_sess_map.find(
-                SESS_ID(ntohl(rbuf.sess_entry.ue_addr.u.ipv4_addr),
-                        DEFAULT_BEARER));
-            zmq_sess_map.erase(it);
-          }
-          break;
-        default:
-          VLOG(1) << "Got a request with mtype: " << mtype << std::endl;
-          break;
-      }
-      size = zmq_send(sender, &resp, sizeof(resp), ZMQ_NOBLOCK);
-      if (size == -1) {
-        std::cerr << "Error in zmq sending: " << strerror(errno) << std::endl;
-        break;
-      } else {
-        VLOG(1) << "Sending back response block" << std::endl;
-      }
-    }
-  }
+	//  Process messages from either socket
+	while (true) {
+		static const zmq_pollitem_t items [] = {
+			{receiver, 0, ZMQ_POLLIN, 0},
+		};
+		zmq_poll((zmq_pollitem_t *)items, 1, -1);
+		if (items[0].revents & ZMQ_POLLIN) {
+			struct msgbuf rbuf;
+			struct resp_msgbuf resp;
+			int size = zmq_recv(receiver, &rbuf, sizeof(rbuf), 0);
+			if (size == -1) {
+				std::cerr << "Error in zmq reception: "
+					  << strerror(errno)
+					  << std::endl;
+				break;
+			}
+			long mtype = rbuf.mtype;
+			memset(&resp, 0, sizeof(struct resp_msgbuf));
+			switch (mtype) {
+			case MSG_SESS_CRE:
+				VLOG(1) << "Got a session create request, ";
+				VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
+					<< ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
+					<< ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
+					<< ", enb_teid: " << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< " (" << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< ")" << std::endl;
+				resp.op_id = rbuf.sess_entry.op_id;
+				resp.dp_id.id = DPN_ID;
+				resp.mtype = DPN_CREATE_RESP;
+				cdr = new struct cdr_msg;
+				if (cdr != NULL) {
+					cdr->session_info = rbuf.sess_entry.dp_session;
+					cdr->ue_context = rbuf.sess_entry.ue_context;
+				}
+				zmq_sess_map[SESS_ID(rbuf.sess_entry.ue_addr.u.ipv4_addr, DEFAULT_BEARER)] = cdr;
+				resp.sess_id = rbuf.sess_entry.sess_id;
+				break;
+			case MSG_SESS_MOD:
+				VLOG(1) << "Got a session modify request, ";
+				VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
+					<< ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
+					<< ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
+					<< ", enb_teid: " << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< " (" << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< ")" << std::endl;
+				resp.op_id = rbuf.sess_entry.op_id;
+				resp.dp_id.id = DPN_ID;
+				resp.mtype = DPN_MODIFY_RESP;
+				resp.sess_id = rbuf.sess_entry.sess_id;
+				if (zmq_sess_map.find(SESS_ID(rbuf.sess_entry.ue_addr.u.ipv4_addr, DEFAULT_BEARER)) ==
+				    zmq_sess_map.end()) {
+					VLOG(1) << "No record found!" << std::endl;
+					break;
+				}
+				{
+				// Create BessClient
+				BessClient b(CreateChannel(std::string(args.bessd_ip) + ":"
+								 + std::to_string(args.bessd_port),
+								 InsecureChannelCredentials()));
+				b.runAddCommand(rbuf.sess_entry.ul_s1_info.sgw_teid,
+						rbuf.sess_entry.dl_s1_info.enb_teid,
+						rbuf.sess_entry.ue_addr.u.ipv4_addr,
+						rbuf.sess_entry.ul_s1_info.enb_addr.u.ipv4_addr,
+						args.encapmod);
+				}
+				break;
+			case MSG_SESS_DEL:
+				VLOG(1) << "Got a session delete request" << std::endl;
+				VLOG(1) << "UEADDR: " << rbuf.sess_entry.ue_addr
+					<< ", ENODEADDR: " << rbuf.sess_entry.ul_s1_info.enb_addr
+					<< ", sgw_teid: " << (rbuf.sess_entry.ul_s1_info.sgw_teid)
+					<< ", enb_teid: " << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< " (" << ntohl(rbuf.sess_entry.dl_s1_info.enb_teid)
+					<< ")" << std::endl;
+				resp.op_id = rbuf.sess_entry.op_id;
+				resp.dp_id.id = DPN_ID;
+				resp.mtype = DPN_DELETE_RESP;
+				resp.sess_id = rbuf.sess_entry.sess_id;
+				/* why is the ue ip address stored in reverse endian order just in delete message? */
+				if (zmq_sess_map.find(SESS_ID(ntohl(rbuf.sess_entry.ue_addr.u.ipv4_addr), DEFAULT_BEARER)) ==
+				    zmq_sess_map.end()) {
+					VLOG(1) << "No record found!" << std::endl;
+					break;
+				}				
+				{
+				// Create BessClient
+				BessClient b(CreateChannel(std::string(args.bessd_ip) + ":"
+								 + std::to_string(args.bessd_port),
+								 InsecureChannelCredentials()));
+				b.runRemoveCommand(rbuf.sess_entry.ue_addr.u.ipv4_addr, args.encapmod);
+				std::map<std::uint64_t, struct cdr_msg *>::iterator it = zmq_sess_map.find(SESS_ID(ntohl(rbuf.sess_entry.ue_addr.u.ipv4_addr),
+														   DEFAULT_BEARER));
+				resp.cdr_msg.ue_context = it->second->ue_context;
+				resp.cdr_msg.session_info = it->second->session_info;
+				if (it->second) delete it->second;
+				zmq_sess_map.erase(it);
+				}
+				break;
+			default:
+				VLOG(1) << "Got a request with mtype: " << mtype << std::endl;
+				break;
+			}
+			size = zmq_send(sender, &resp, sizeof(resp), ZMQ_NOBLOCK);
+			if (size == -1) {
+				std::cerr << "Error in zmq sending: "
+					  << strerror(errno)
+					  << std::endl;
+				break;
+			} else {
+				VLOG(1) << "Sending back response block" << std::endl;
+			}
+		}
+	}
 
   return EXIT_SUCCESS;
 }
