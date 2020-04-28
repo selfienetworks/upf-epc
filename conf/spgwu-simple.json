@@ -1,0 +1,21 @@
+{
+    "": "UE IP range",
+    "ue_cidr": "16.0.0.0/16",
+
+    "": "eNodeB IP range",
+    "enb_cidr": "11.1.1.128/25",
+
+    "": "Gateway interfaces",
+    "s1u": {
+        "ifname": "ens803f2"
+    },
+
+    "": "UE IP Natting. Update the line below to `\"ip_masquerade\": \"<ip> [or <ip>]\"` to enable",
+    "sgi": {
+        "ifname": "ens803f3",
+	"": "ip_masquerade: 18.0.0.1 or 18.0.0.2 or 18.0.0.3"
+    },
+
+    "": "Number of worker threads. Default: use 1 thread to run both (uplink/downlink) pipelines",
+    "workers": 1
+}
