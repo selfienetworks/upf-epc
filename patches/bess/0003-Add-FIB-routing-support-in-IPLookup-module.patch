@@ -44,7 +44,7 @@ index 3c8b1157..c45edcf8 100644
 +#if RTE_VERSION < RTE_VERSION_NUM(19, 11, 0, 0)
    lpm_ = rte_lpm_create(name().c_str(), /* socket_id = */ 0, &conf);
 +#else
-+  lpm_ = rte_fib_create(name().c_str(), /* socket_id = */ 0, &conf);
++  lpm_ = rte_fib_create(name().c_str(), /* socket_id = */ rte_socket_id(), &conf);
 +#endif
  
    if (!lpm_) {
