@@ -1,0 +1,66 @@
+From f8cf05943718f0de37e1b1b65588b05c213dc53c Mon Sep 17 00:00:00 2001
+From: Saikrishna Edupuganti <saikrishna.edupuganti@intel.com>
+Date: Sun, 7 Jun 2020 15:29:36 +0000
+Subject: [PATCH] [DPDK] Add AF_XDP PMD support
+
+We automatically detect if relevant header files, libbpf and deps are
+installed on the system and update CONFIG_RTE_LIBRTE_PMD_AF_XDP
+accordingly.
+
+Fixes: #987
+
+Signed-off-by: Saikrishna Edupuganti <saikrishna.edupuganti@intel.com>
+---
+ build.py | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/build.py b/build.py
+index 3fac9064..5ada6fa9 100755
+--- a/build.py
++++ b/build.py
+@@ -99,6 +99,7 @@ DPDK_CFLAGS = '"-g -w -fPIC"'
+ DPDK_CONFIG = '%s/build/.config' % DPDK_DIR
+ 
+ extra_libs = set()
++extra_libs_deps = set()
+ cxx_flags = []
+ ld_flags = []
+ plugins = []
+@@ -223,6 +224,17 @@ def check_kernel_headers():
+         set_config(DPDK_CONFIG, 'CONFIG_RTE_LIBRTE_PMD_KNI', 'n')
+ 
+ 
++def check_afxdp():
++    if check_header('linux/if_xdp.h', 'gcc') and check_c_lib('bpf') and \
++            check_c_lib('elf') and check_c_lib('z'):
++        extra_libs.add('bpf')
++        extra_libs_deps.add('elf')
++        set_config(DPDK_CONFIG, 'CONFIG_RTE_LIBRTE_PMD_AF_XDP', 'y')
++    else:
++        print(' - libbpf and dependencies are not available. Disabling AF_XDP PMD...')
++        set_config(DPDK_CONFIG, 'CONFIG_RTE_LIBRTE_PMD_AF_XDP', 'n')
++
++
+ def check_bnx():
+     if check_header('zlib.h', 'gcc') and check_c_lib('z'):
+         extra_libs.add('z')
+@@ -251,6 +263,8 @@ def check_mlx():
+ def generate_dpdk_extra_mk():
+     with open('core/extra.dpdk.mk', 'w') as fp:
+         fp.write('LIBS += %s\n' % ' '.join(['-l' + lib for lib in extra_libs]))
++        fp.write('LIBS += %s\n' %
++                 ' '.join(['-l' + lib for lib in extra_libs_deps]))
+ 
+ 
+ def find_current_plugins():
+@@ -296,6 +310,7 @@ def configure_dpdk():
+     cmd('make -C %s config T=%s' % (DPDK_DIR, DPDK_TARGET))
+ 
+     check_kernel_headers()
++    check_afxdp()
+     check_mlx()
+     generate_dpdk_extra_mk()
+ 
+-- 
+2.25.1
+

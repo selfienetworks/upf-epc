@@ -29,35 +29,17 @@ RUN mkdir linux && \
     make $MAKEFLAGS install_headers && \
     ldconfig
 
-# dpdk
-ARG DPDK_URL='http://dpdk.org/git/dpdk-stable'
-ARG DPDK_VER='19.11'
-ENV DPDK_DIR="/dpdk"
-RUN git clone -b $DPDK_VER -q --depth 1 $DPDK_URL $DPDK_DIR
-
-# Customizing DPDK install
-WORKDIR $DPDK_DIR
-
-ARG CPU=native
-ARG RTE_TARGET='x86_64-native-linuxapp-gcc'
-RUN sed -ri 's,(IGB_UIO=).*,\1n,' config/common_linux* && \
-    sed -ri 's,(KNI_KMOD=).*,\1n,' config/common_linux* && \
-    sed -ri 's,(LIBRTE_BPF=).*,\1n,' config/common_base && \
-    sed -ri 's,(LIBRTE_PMD_PCAP=).*,\1y,' config/common_base && \
-    sed -ri 's,(PORT_PCAP=).*,\1y,' config/common_base && \
-    sed -ri 's,(AF_XDP=).*,\1y,' config/common_base && \
-    make config T=$RTE_TARGET && \
-    make $MAKEFLAGS EXTRA_CFLAGS="-march=$CPU -g -w -fPIC -DALLOW_EXPERIMENTAL_API"
-
 WORKDIR /
 ARG BESS_COMMIT=master
 RUN apt-get update && apt-get install -y wget unzip ca-certificates git
 RUN wget -qO bess.zip https://github.com/NetSys/bess/archive/${BESS_COMMIT}.zip && unzip bess.zip
 WORKDIR bess-${BESS_COMMIT}
-COPY core/ core/
 COPY patches/bess patches
-RUN cp -a ${DPDK_DIR} deps/dpdk-19.11.1 && \
-    cat patches/* | patch -p1
+RUN cat patches/* | patch -p1
+RUN ./build.py dpdk
+COPY core/ core/
+# Hack to get static version linked
+RUN rm -f /usr/local/lib64/libbpf.so*
 RUN ./build.py bess && \
     cp bin/bessd /bin && \
     mkdir -p /opt/bess && \
