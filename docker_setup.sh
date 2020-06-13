@@ -114,9 +114,9 @@ fi
 
 # Run pause
 docker run --name pause -td --restart unless-stopped \
-       -p $gui_port:$gui_port \
-       --hostname `hostname` \
-       k8s.gcr.io/pause
+	-p $gui_port:$gui_port \
+	--hostname $(hostname) \
+	k8s.gcr.io/pause
 
 # Run bessd
 docker run --name bess -td --restart unless-stopped \
